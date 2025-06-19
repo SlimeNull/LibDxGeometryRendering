@@ -21,6 +21,7 @@ namespace LibQuadsRenderer
         private readonly int _width;
         private readonly int _height;
         private readonly int _maxQuadCount;
+        private int _quadCount;
 
         // D3D11 API
         private ComPtr<ID3D11Device> _device;
@@ -37,6 +38,7 @@ namespace LibQuadsRenderer
 
         // Buffer resources
         private ComPtr<ID3D11Buffer> _vertexBuffer;
+        private bool _disposedValue;
 
         // Viewport
         private readonly Viewport _viewport;
@@ -296,8 +298,18 @@ namespace LibQuadsRenderer
             _context.RSSetState(rasterizerState);
         }
 
+        private void EnsureNotDisposed()
+        {
+            if (_disposedValue)
+            {
+                throw new InvalidOperationException("Object disposed");
+            }
+        }
+
         public void SetQuads(ReadOnlySpan<Quad> quads)
         {
+            EnsureNotDisposed();
+
             if (quads.Length > _maxQuadCount)
             {
                 throw new ArgumentException($"Quad count ({quads.Length}) exceeds maximum capacity ({_maxQuadCount}).");
@@ -314,10 +326,14 @@ namespace LibQuadsRenderer
 
             // Unmap the vertex buffer
             _context.Unmap(_vertexBuffer, 0);
+
+            _quadCount = quads.Length;
         }
 
         public void Render(Span<byte> bgraBuffer)
         {
+            EnsureNotDisposed();
+
             if (bgraBuffer.Length < _width * _height * 4)
             {
                 throw new ArgumentException("Buffer is too small for the specified dimensions.");
@@ -353,7 +369,7 @@ namespace LibQuadsRenderer
             _context.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyPointlist);
 
             // Draw quads
-            _context.Draw((uint)_maxQuadCount, 0);
+            _context.Draw((uint)_quadCount, 0);
 
             // Copy from render target to staging texture for CPU access
             _context.CopyResource(_stagingTexture, _renderTarget);
@@ -552,30 +568,48 @@ namespace LibQuadsRenderer
             return result;
         }
 
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposedValue)
+            {
+                // Release Direct3D resources
+                _renderTargetView.Dispose();
+                _renderTarget.Dispose();
+                _stagingTexture.Dispose();
+                _vertexShader.Dispose();
+                _geometryShader.Dispose();
+                _pixelShader.Dispose();
+                _inputLayout.Dispose();
+                _vertexBuffer.Dispose();
+
+                // Release device and context
+                if (_context.Handle != null)
+                {
+                    _context.ClearState();
+                    _context.Flush();
+                    _context.Dispose();
+                }
+
+                if (_device.Handle != null)
+                {
+                    _device.Dispose();
+                }
+
+                _disposedValue = true;
+            }
+        }
+
+        ~QuadsRenderer()
+        {
+            // 不要更改此代码。请将清理代码放入“Dispose(bool disposing)”方法中
+            Dispose(disposing: false);
+        }
+
         public void Dispose()
         {
-            // Release Direct3D resources
-            _renderTargetView.Dispose();
-            _renderTarget.Dispose();
-            _stagingTexture.Dispose();
-            _vertexShader.Dispose();
-            _geometryShader.Dispose();
-            _pixelShader.Dispose();
-            _inputLayout.Dispose();
-            _vertexBuffer.Dispose();
-
-            // Release device and context
-            if (_context.Handle != null)
-            {
-                _context.ClearState();
-                _context.Flush();
-                _context.Dispose();
-            }
-
-            if (_device.Handle != null)
-            {
-                _device.Dispose();
-            }
+            // 不要更改此代码。请将清理代码放入“Dispose(bool disposing)”方法中
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
         }
     }
 
