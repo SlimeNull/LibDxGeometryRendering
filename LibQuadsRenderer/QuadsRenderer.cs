@@ -92,9 +92,6 @@ namespace LibQuadsRenderer
 
         private void CreateDeviceContext(out ComPtr<ID3D11Device> device, out ComPtr<ID3D11DeviceContext> context)
         {
-            Guid deviceGuid = new Guid("db6f6ddb-ac77-4e88-8253-819df9bbf140"); // IID_ID3D11Device
-            Guid contextGuid = new Guid("c0bfa96c-e089-44fb-8eaf-26f8796190da"); // IID_ID3D11DeviceContext
-
             using var d3d11 = D3D11.GetApi(null, false);
 
             // Create D3D11 device and context
