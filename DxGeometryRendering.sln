@@ -5,7 +5,7 @@ VisualStudioVersion = 17.13.35825.156
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuadsRenderer", "QuadsRenderer\QuadsRenderer.csproj", "{3DE5F75E-EE39-4118-AF36-3D63E9956ED4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibQuadsRenderer", "LibQuadsRenderer\LibQuadsRenderer.csproj", "{B2DDAC14-F095-4C2D-8CC8-4D81D491DD5E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibDxGeometryRendering", "LibQuadsRenderer\LibDxGeometryRendering.csproj", "{B2DDAC14-F095-4C2D-8CC8-4D81D491DD5E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerformanceTest", "PerformanceTest\PerformanceTest.csproj", "{EFA8707D-A8B2-4F6B-BAD6-3856519B5E26}"
 EndProject
