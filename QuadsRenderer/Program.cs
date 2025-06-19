@@ -12,6 +12,7 @@ namespace QuadsRendererTest
 
             var rotation15 = MathF.PI / 12;
             var testQuad = new Quad(new Vector2(500, 500), new Vector2(100f, 100f), rotation15, 5f, new ColorRgba(255, 255, 0, 255), new ColorRgba(0, 0, 255, 255));
+            quadsRenderer.SetAntialiasing(true);
             quadsRenderer.SetQuads([
                 testQuad
             ]);

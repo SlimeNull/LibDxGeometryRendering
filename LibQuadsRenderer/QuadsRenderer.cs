@@ -23,6 +23,10 @@ namespace LibQuadsRenderer
         private readonly int _maxQuadCount;
         private int _quadCount;
 
+        // 添加抗锯齿相关字段
+        private bool _antialiasingEnabled;
+        private ComPtr<ID3D11Texture2D> _resolveTexture; // 用于存储多重采样解析结果
+
         // D3D11 API
         private ComPtr<ID3D11Device> _device;
         private ComPtr<ID3D11DeviceContext> _context;
@@ -125,7 +129,7 @@ namespace LibQuadsRenderer
 
         private void CreateRenderTargets()
         {
-            // Create the render target texture
+            // 创建渲染目标纹理
             Texture2DDesc rtDesc = new Texture2DDesc
             {
                 Width = (uint)_width,
@@ -133,32 +137,51 @@ namespace LibQuadsRenderer
                 MipLevels = 1,
                 ArraySize = 1,
                 Format = Format.FormatB8G8R8A8Unorm,
-                SampleDesc = new SampleDesc { Count = 1, Quality = 0 },
+                SampleDesc = _antialiasingEnabled ?
+                    new SampleDesc { Count = 4, Quality = 0 } : // 4x MSAA
+                    new SampleDesc { Count = 1, Quality = 0 },  // 无抗锯齿
                 Usage = Usage.Default,
                 BindFlags = (uint)BindFlag.RenderTarget | (uint)BindFlag.ShaderResource,
                 CPUAccessFlags = 0,
                 MiscFlags = 0
             };
-
-            // Create render target texture
+            // 创建渲染目标纹理
             _device.CreateTexture2D(in rtDesc, null, ref _renderTarget);
-
-            // Create render target view
+            // 创建渲染目标视图
             RenderTargetViewDesc rtvDesc = new RenderTargetViewDesc
             {
                 Format = Format.FormatB8G8R8A8Unorm,
-                ViewDimension = RtvDimension.Texture2D,
-                // No union fields needed for 2D
+                ViewDimension = _antialiasingEnabled ?
+                    RtvDimension.Texture2Dms :  // 多重采样
+                    RtvDimension.Texture2D,     // 无多重采样
+                                                // 不需要设置联合字段
             };
-
             _device.CreateRenderTargetView(_renderTarget, in rtvDesc, ref _renderTargetView);
+            // 如果启用了抗锯齿，创建resolve纹理，用于存储解析结果
+            if (_antialiasingEnabled)
+            {
+                // 创建非多重采样的纹理，用于解析
+                Texture2DDesc resolveDesc = rtDesc;
+                resolveDesc.SampleDesc.Count = 1;
+                resolveDesc.SampleDesc.Quality = 0;
 
-            // Create staging texture for readback
-            Texture2DDesc stagingDesc = rtDesc;
-            stagingDesc.Usage = Usage.Staging;
-            stagingDesc.BindFlags = 0;
-            stagingDesc.CPUAccessFlags = (uint)CpuAccessFlag.Read;
+                _device.CreateTexture2D(in resolveDesc, null, ref _resolveTexture);
+            }
 
+            // 创建staging纹理用于回读（始终是非多重采样的）
+            Texture2DDesc stagingDesc = new Texture2DDesc
+            {
+                Width = (uint)_width,
+                Height = (uint)_height,
+                MipLevels = 1,
+                ArraySize = 1,
+                Format = Format.FormatB8G8R8A8Unorm,
+                SampleDesc = new SampleDesc { Count = 1, Quality = 0 }, // 始终非多重采样
+                Usage = Usage.Staging,
+                BindFlags = 0,
+                CPUAccessFlags = (uint)CpuAccessFlag.Read,
+                MiscFlags = 0
+            };
             _device.CreateTexture2D(in stagingDesc, null, ref _stagingTexture);
         }
 
@@ -337,12 +360,39 @@ namespace LibQuadsRenderer
             _context.RSSetState(rasterizerState);
         }
 
+        // 释放并重新创建渲染目标资源
+        private void RecreateRenderTargets()
+        {
+            // 释放现有资源
+            _renderTargetView.Dispose();
+            _renderTarget.Dispose();
+            _resolveTexture.Dispose();
+
+            // 保持staging纹理不变，因为它总是非多重采样的
+
+            // 创建新的渲染目标
+            CreateRenderTargets();
+        }
+
         private void EnsureNotDisposed()
         {
             if (_disposedValue)
             {
                 throw new InvalidOperationException("Object disposed");
             }
+        }
+
+        public void SetAntialiasing(bool enable)
+        {
+            EnsureNotDisposed();
+
+            if (_antialiasingEnabled == enable)
+                return; // 状态未改变，不需要重建资源
+
+            _antialiasingEnabled = enable;
+
+            // 重新创建渲染目标
+            RecreateRenderTargets();
         }
 
         public void SetTransform(MatrixTransform transform)
@@ -452,8 +502,20 @@ namespace LibQuadsRenderer
             // Draw quads
             _context.Draw((uint)_quadCount, 0);
 
-            // Copy from render target to staging texture for CPU access
-            _context.CopyResource(_stagingTexture, _renderTarget);
+            // 处理抗锯齿和回读操作
+            if (_antialiasingEnabled)
+            {
+                // 解析多重采样纹理到非多重采样纹理
+                _context.ResolveSubresource(_resolveTexture, 0, _renderTarget, 0, Format.FormatB8G8R8A8Unorm);
+
+                // 从解析纹理复制到staging纹理
+                _context.CopyResource(_stagingTexture, _resolveTexture);
+            }
+            else
+            {
+                // 直接从渲染目标复制到staging纹理
+                _context.CopyResource(_stagingTexture, _renderTarget);
+            }
 
             // Map staging texture to read the pixels
             MappedSubresource mappedResource;
