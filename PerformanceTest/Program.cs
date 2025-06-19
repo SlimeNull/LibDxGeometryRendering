@@ -10,8 +10,8 @@ namespace PerformanceTest
     {
         static unsafe void Main(string[] args)
         {
-            var canvasWidth = 1000;
-            var canvasHeight = 1000;
+            var canvasWidth = 2000;
+            var canvasHeight = 2000;
             var quadCount = 1000000;
 
             Bitmap bitmap = new Bitmap(1000, 1000, System.Drawing.Imaging.PixelFormat.Format32bppArgb);

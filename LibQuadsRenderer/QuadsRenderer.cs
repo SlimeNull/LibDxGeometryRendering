@@ -97,12 +97,8 @@ namespace LibQuadsRenderer
             // Create D3D11 device and context
             D3DFeatureLevel[] featureLevels = { D3DFeatureLevel.Level111, D3DFeatureLevel.Level110, D3DFeatureLevel.Level100 };
 
-            // Create with debug layer in debug builds
-#if DEBUG
+            // Create with debug layer in debug builds (奇怪, 只要不带 Debug flag, 就会异常!)
             uint flags = (uint)CreateDeviceFlag.Debug;
-#else
-        uint flags = 0;
-#endif
 
             device = default;
             context = default;
