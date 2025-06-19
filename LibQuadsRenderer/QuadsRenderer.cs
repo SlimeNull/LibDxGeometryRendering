@@ -37,6 +37,7 @@ namespace LibQuadsRenderer
         private ComPtr<ID3D11InputLayout> _inputLayout;
 
         // Buffer resources
+        private ComPtr<ID3D11Buffer> _constantBuffer;
         private ComPtr<ID3D11Buffer> _vertexBuffer;
         private bool _disposedValue;
 
@@ -66,6 +67,9 @@ namespace LibQuadsRenderer
 
             // Create vertex buffer
             CreateVertexBuffer();
+
+            // Create constant buffer
+            CreateConstantBuffer();
 
             // Set up viewport
             _viewport = new Viewport
@@ -172,6 +176,41 @@ namespace LibQuadsRenderer
                 _device.CreateVertexShader(vsBytesPtr, (nuint)vsBytes.Length, ref Unsafe.NullRef<ID3D11ClassLinkage>(), ref _vertexShader);
                 _device.CreateGeometryShader(gsBytesPtr, (nuint)gsBytes.Length, ref Unsafe.NullRef<ID3D11ClassLinkage>(), ref _geometryShader);
                 _device.CreatePixelShader(psBytesPtr, (nuint)psBytes.Length, ref Unsafe.NullRef<ID3D11ClassLinkage>(), ref _pixelShader);
+            }
+        }
+
+        private void CreateConstantBuffer()
+        {
+            // 创建常量缓冲区 - 现在需要更大空间来存储变换矩阵
+            // float2 screenSize + float3x3 transform (需要16字节对齐)
+            BufferDesc constBufferDesc = new BufferDesc
+            {
+                BindFlags = (uint)BindFlag.ConstantBuffer,
+                // 常量缓冲区结构：
+                // float2 screenSize; (8字节，但会被填充到16字节)
+                // float3x3 transform; (9个float，36字节，但会被填充到48字节)
+                // 总共 64 字节
+                ByteWidth = 64,
+                CPUAccessFlags = (uint)CpuAccessFlag.Write,
+                Usage = Usage.Dynamic
+            };
+
+            ReadOnlySpan<float> initConstBufferData =
+            [
+                _width, _height, 0, 0,
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0
+            ];
+
+            fixed (float* initConstBufferDataPtr = initConstBufferData)
+            {
+                SubresourceData subResourceData = new SubresourceData()
+                {
+                    PSysMem = initConstBufferDataPtr,
+                };
+
+                _device.CreateBuffer(in constBufferDesc, ref subResourceData, ref _constantBuffer);
             }
         }
 
@@ -306,6 +345,45 @@ namespace LibQuadsRenderer
             }
         }
 
+        public void SetTransform(MatrixTransform transform)
+        {
+            EnsureNotDisposed();
+
+            // 更新常量缓冲区中的屏幕尺寸和变换矩阵
+            MappedSubresource mappedConstBuffer = default;
+            _context.Map(_constantBuffer, 0, Map.WriteDiscard, 0, ref mappedConstBuffer);
+
+            float* bufferData = (float*)mappedConstBuffer.PData;
+
+            // 设置屏幕尺寸
+            bufferData[0] = _width;
+            bufferData[1] = _height;
+
+            // 从第16字节开始设置变换矩阵（按行主序）
+            float* matrixData = bufferData + 4; // 跳过前16字节（screenSize后面有填充）
+
+            // 在着色器中使用的3x3矩阵
+            // [ M11 M12 0 ]
+            // [ M21 M22 0 ]
+            // [ OffsetX OffsetY 1 ]
+            matrixData[0] = transform.M11;
+            matrixData[1] = transform.M12;
+            matrixData[2] = 0;
+            matrixData[3] = 0; // 填充
+
+            matrixData[4] = transform.M21;
+            matrixData[5] = transform.M22;
+            matrixData[6] = 0;
+            matrixData[7] = 0; // 填充
+
+            matrixData[8] = transform.OffsetX;
+            matrixData[9] = transform.OffsetY;
+            matrixData[10] = 1;
+            matrixData[11] = 0; // 填充
+
+            _context.Unmap(_constantBuffer, 0);
+        }
+
         public void SetQuads(ReadOnlySpan<Quad> quads)
         {
             EnsureNotDisposed();
@@ -368,6 +446,9 @@ namespace LibQuadsRenderer
             // Set primitive topology
             _context.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyPointlist);
 
+            // Set constant buffer
+            _context.GSSetConstantBuffers(0, 1, ref _constantBuffer);
+
             // Draw quads
             _context.Draw((uint)_quadCount, 0);
 
@@ -400,6 +481,12 @@ namespace LibQuadsRenderer
             string shaderCode = """
                 // QuadShader.hlsl
 
+                cbuffer ScreenBuffer : register(b0)
+                {
+                    float2 screenSize;  // width, height
+                    float3x3 transform; // 变换矩阵
+                };
+
                 // 顶点着色器输入
                 struct VS_INPUT
                 {
@@ -429,6 +516,20 @@ namespace LibQuadsRenderer
                     float4 Color : COLOR0;          // 像素颜色
                 };
 
+                float2 ScreenToClipPoint(float2 input)
+                {
+                    // 应用变换矩阵
+                    float3 pos = float3(input, 1.0f);
+                    float3 transformedPos = mul(transform, pos);
+                    
+                    // Convert from screen coordinates (0 to width/height) to clip space (-1 to 1)
+                    float2 normalizedPos;
+                    normalizedPos.x = (transformedPos.x / screenSize.x) * 2.0f - 1.0f;
+                    normalizedPos.y = 1.0f - (transformedPos.y / screenSize.y) * 2.0f; // 反转Y轴，因为DirectX中Y轴向下
+
+                    return normalizedPos;
+                }
+
                 // 顶点着色器
                 GS_INPUT VS(VS_INPUT input)
                 {
@@ -457,21 +558,21 @@ namespace LibQuadsRenderer
                     // 生成旋转矩阵
                     float sinR = sin(i.Rotation);
                     float cosR = cos(i.Rotation);
-                    float2x2 rotMatrix = float2x2(cosR, -sinR, sinR, cosR);
+                    float2x2 rotMatrix = float2x2(cosR, sinR, -sinR, cosR);
                     
                     // 外部矩形的四个顶点（顺时针）
                     float2 outerCorners[4];
-                    outerCorners[0] = mul(float2(-outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position; // 左上
-                    outerCorners[1] = mul(float2(outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position;  // 右上
-                    outerCorners[2] = mul(float2(outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position;   // 右下
-                    outerCorners[3] = mul(float2(-outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position;  // 左下
+                    outerCorners[0] = ScreenToClipPoint(mul(float2(-outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position); // 左上
+                    outerCorners[1] = ScreenToClipPoint(mul(float2(outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position);  // 右上
+                    outerCorners[2] = ScreenToClipPoint(mul(float2(outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position);   // 右下
+                    outerCorners[3] = ScreenToClipPoint(mul(float2(-outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position);  // 左下
                     
                     // 内部矩形的四个顶点（顺时针）
                     float2 innerCorners[4];
-                    innerCorners[0] = mul(float2(-innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position; // 左上
-                    innerCorners[1] = mul(float2(innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position;  // 右上
-                    innerCorners[2] = mul(float2(innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position;   // 右下
-                    innerCorners[3] = mul(float2(-innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position;  // 左下
+                    innerCorners[0] = ScreenToClipPoint(mul(float2(-innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position); // 左上
+                    innerCorners[1] = ScreenToClipPoint(mul(float2(innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position);  // 右上
+                    innerCorners[2] = ScreenToClipPoint(mul(float2(innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position);   // 右下
+                    innerCorners[3] = ScreenToClipPoint(mul(float2(-innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position);  // 左下
                     
                     // 准备顶点
                     PS_INPUT v[12];
@@ -555,15 +656,21 @@ namespace LibQuadsRenderer
 
             var shaderCodeBytes = EncodingUtils.EncodeToAscii(shaderCode);
 
-            ComPtr<ID3D10Blob> compiledShader = default;
-            ComPtr<ID3D10Blob> errorMsgs = null;
+            ComPtr<ID3D10Blob> blobCompiledShader = default;
+            ComPtr<ID3D10Blob> blobErrorMsgs = null;
             fixed (byte* pShaderCode = shaderCodeBytes)
             {
-                compiler.Compile(pShaderCode, (nuint)(shaderCodeBytes.Length), "shader", ref Unsafe.NullRef<D3DShaderMacro>(), ref Unsafe.NullRef<ID3DInclude>(), entryPoint, profile, 0, 0, ref compiledShader, ref errorMsgs);
+                compiler.Compile(pShaderCode, (nuint)(shaderCodeBytes.Length), "shader", ref Unsafe.NullRef<D3DShaderMacro>(), ref Unsafe.NullRef<ID3DInclude>(), entryPoint, profile, 0, 0, ref blobCompiledShader, ref blobErrorMsgs);
             }
 
-            var result = new Span<byte>(compiledShader.GetBufferPointer(), (int)compiledShader.GetBufferSize()).ToArray();
-            compiledShader.Dispose();
+            if (blobErrorMsgs.Handle != null)
+            {
+                string errorMsgs = Marshal.PtrToStringAnsi((nint)blobErrorMsgs.GetBufferPointer(), (int)blobErrorMsgs.GetBufferSize());
+                throw new InvalidOperationException(errorMsgs);
+            }
+
+            var result = new Span<byte>(blobCompiledShader.GetBufferPointer(), (int)blobCompiledShader.GetBufferSize()).ToArray();
+            blobCompiledShader.Dispose();
 
             return result;
         }
@@ -581,6 +688,7 @@ namespace LibQuadsRenderer
                 _pixelShader.Dispose();
                 _inputLayout.Dispose();
                 _vertexBuffer.Dispose();
+                _constantBuffer.Dispose();
 
                 // Release device and context
                 if (_context.Handle != null)

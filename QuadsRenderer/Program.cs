@@ -10,7 +10,8 @@ namespace QuadsRendererTest
             Bitmap bitmap = new Bitmap(1000, 1000, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             QuadsRenderer quadsRenderer = new QuadsRenderer(1000, 1000, 10);
 
-            var testQuad = new Quad(new Vector2(0, 0), new Vector2(0.5f, 0.5f), 0, 0.1f, new ColorRgba(255, 255, 0, 255), new ColorRgba(0, 0, 255, 255));
+            var rotation15 = MathF.PI / 12;
+            var testQuad = new Quad(new Vector2(500, 500), new Vector2(100f, 100f), rotation15, 5f, new ColorRgba(255, 255, 0, 255), new ColorRgba(0, 0, 255, 255));
             quadsRenderer.SetQuads([
                 testQuad
             ]);
