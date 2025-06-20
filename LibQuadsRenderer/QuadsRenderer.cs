@@ -50,6 +50,12 @@ namespace LibDxGeometryRendering
         // Vertex layout
         private readonly int _quadStride = Unsafe.SizeOf<Quad>();
 
+        // Constants
+        private MatrixTransform _transform = MatrixTransform.Identity;
+        private float _strokeThicknessFactor = 1;
+        private float _widthFactor = 1;
+        private float _heightFactor = 1;
+
         public int Width => _width;
         public int Height => _height;
         public int MaxQuadCount => _maxQuadCount;
@@ -208,8 +214,9 @@ namespace LibDxGeometryRendering
                 // 常量缓冲区结构：
                 // float2 screenSize; (8字节，但会被填充到16字节)
                 // float3x3 transform; (9个float，36字节，但会被填充到48字节)
-                // 总共 64 字节
-                ByteWidth = 64,
+                // float3 strokeWidthFactorAndSizeFactor;  (16bytes
+                // 总共 80 字节
+                ByteWidth = 80,
                 CPUAccessFlags = (uint)CpuAccessFlag.Write,
                 Usage = Usage.Dynamic
             };
@@ -219,7 +226,8 @@ namespace LibDxGeometryRendering
                 _width, _height, 0, 0,
                 1, 0, 0, 0,
                 0, 1, 0, 0,
-                0, 0, 1, 0
+                0, 0, 1, 0,
+                1, 1, 1, 0
             ];
 
             fixed (float* initConstBufferDataPtr = initConstBufferData)
@@ -370,6 +378,49 @@ namespace LibDxGeometryRendering
             CreateRenderTargets();
         }
 
+        private void UpdateConstantBuffer()
+        {
+            // 更新常量缓冲区中的屏幕尺寸和变换矩阵
+            MappedSubresource mappedConstBuffer = default;
+            _context.Map(_constantBuffer, 0, Map.WriteDiscard, 0, ref mappedConstBuffer);
+
+            float* bufferData = (float*)mappedConstBuffer.PData;
+
+            // 设置屏幕尺寸
+            bufferData[0] = _width;
+            bufferData[1] = _height;
+
+            // 从第16字节开始设置变换矩阵（按行主序）
+            float* matrixData = bufferData + 4; // 跳过前16字节（screenSize后面有填充）
+
+            // 在着色器中使用的3x3矩阵
+            // [ M11 M12 0 ]
+            // [ M21 M22 0 ]
+            // [ OffsetX OffsetY 1 ]
+            matrixData[0] = _transform.M11;
+            matrixData[1] = _transform.M12;
+            matrixData[2] = 0;
+            matrixData[3] = 0; // 填充
+
+            matrixData[4] = _transform.M21;
+            matrixData[5] = _transform.M22;
+            matrixData[6] = 0;
+            matrixData[7] = 0; // 填充
+
+            matrixData[8] = _transform.OffsetX;
+            matrixData[9] = _transform.OffsetY;
+            matrixData[10] = 1;
+            matrixData[11] = 0; // 填充
+
+            // 从第16字节开始设置变换矩阵（按行主序）
+            float* factorsData = bufferData + 16;
+            factorsData[0] = _strokeThicknessFactor;
+            factorsData[1] = _widthFactor;
+            factorsData[2] = _heightFactor;
+
+            _context.Unmap(_constantBuffer, 0);
+        }
+
         private void EnsureNotDisposed()
         {
             if (_disposedValue)
@@ -395,39 +446,18 @@ namespace LibDxGeometryRendering
         {
             EnsureNotDisposed();
 
-            // 更新常量缓冲区中的屏幕尺寸和变换矩阵
-            MappedSubresource mappedConstBuffer = default;
-            _context.Map(_constantBuffer, 0, Map.WriteDiscard, 0, ref mappedConstBuffer);
+            _transform = transform;
+            UpdateConstantBuffer();
+        }
 
-            float* bufferData = (float*)mappedConstBuffer.PData;
+        public void SetQuadsFactors(float strokeThicknessFactor, float widthFactor, float heightFactor)
+        {
+            EnsureNotDisposed();
 
-            // 设置屏幕尺寸
-            bufferData[0] = _width;
-            bufferData[1] = _height;
-
-            // 从第16字节开始设置变换矩阵（按行主序）
-            float* matrixData = bufferData + 4; // 跳过前16字节（screenSize后面有填充）
-
-            // 在着色器中使用的3x3矩阵
-            // [ M11 M12 0 ]
-            // [ M21 M22 0 ]
-            // [ OffsetX OffsetY 1 ]
-            matrixData[0] = transform.M11;
-            matrixData[1] = transform.M12;
-            matrixData[2] = 0;
-            matrixData[3] = 0; // 填充
-
-            matrixData[4] = transform.M21;
-            matrixData[5] = transform.M22;
-            matrixData[6] = 0;
-            matrixData[7] = 0; // 填充
-
-            matrixData[8] = transform.OffsetX;
-            matrixData[9] = transform.OffsetY;
-            matrixData[10] = 1;
-            matrixData[11] = 0; // 填充
-
-            _context.Unmap(_constantBuffer, 0);
+            _strokeThicknessFactor = strokeThicknessFactor;
+            _widthFactor = widthFactor;
+            _heightFactor = heightFactor;
+            UpdateConstantBuffer();
         }
 
         public void SetQuads(ReadOnlySpan<Quad> quads)
@@ -543,6 +573,7 @@ namespace LibDxGeometryRendering
                 {
                     float2 screenSize;  // width, height
                     float3x3 transform; // 变换矩阵
+                    float3 strokeWidthFactorAndSizeFactor;
                 };
 
                 // 顶点着色器输入
@@ -607,9 +638,12 @@ namespace LibDxGeometryRendering
                 void GS(point GS_INPUT input[1], inout TriangleStream<PS_INPUT> triStream)
                 {
                     GS_INPUT i = input[0];
+
+                    float strokeWidth = i.StrokeWidth * strokeWidthFactorAndSizeFactor.x;
+                    float2 size = float2(i.Size.x * strokeWidthFactorAndSizeFactor.y, i.Size.y * strokeWidthFactorAndSizeFactor.z);
                     
-                    float halfStrokeWidth = i.StrokeWidth / 2;
-                    float2 halfSize = i.Size * 0.5f;
+                    float halfStrokeWidth = strokeWidth / 2;
+                    float2 halfSize = size * 0.5f;
                     float2 outerHalfSize = halfSize + float2(halfStrokeWidth, halfStrokeWidth);
                     float2 innerHalfSize = halfSize - float2(halfStrokeWidth, halfStrokeWidth);
                     

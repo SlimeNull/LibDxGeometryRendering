@@ -6,5 +6,8 @@ using System.Threading.Tasks;
 
 namespace LibDxGeometryRendering
 {
-    public record struct MatrixTransform(float M11, float M12, float M21, float M22, float OffsetX, float OffsetY);
+    public record struct MatrixTransform(float M11, float M12, float M21, float M22, float OffsetX, float OffsetY)
+    {
+        public static readonly MatrixTransform Identity = new MatrixTransform(1, 0, 0, 1, 0, 0);
+    }
 }
