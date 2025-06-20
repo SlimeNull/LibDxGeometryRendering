@@ -414,43 +414,26 @@ namespace LibDxGeometryRendering
 
         private void UpdateConstantBuffer()
         {
+            ReadOnlySpan<float> constBufferData =
+            [
+                _width,                 _height,            0,             0,
+                _transform.M11,         _transform.M12,     0,             0,
+                _transform.M21,         _transform.M22,     0,             0,
+                _transform.OffsetX,     _transform.OffsetY, 1,             0,
+                _strokeThicknessFactor, _widthFactor,       _heightFactor, 0
+            ];
+
             // 更新常量缓冲区中的屏幕尺寸和变换矩阵
             MappedSubresource mappedConstBuffer = default;
             _context.Map(_constantBuffer, 0, Map.WriteDiscard, 0, ref mappedConstBuffer);
 
-            float* bufferData = (float*)mappedConstBuffer.PData;
-
-            // 设置屏幕尺寸
-            bufferData[0] = _width;
-            bufferData[1] = _height;
-
-            // 从第16字节开始设置变换矩阵（按行主序）
-            float* matrixData = bufferData + 4; // 跳过前16字节（screenSize后面有填充）
-
-            // 在着色器中使用的3x3矩阵
-            // [ M11 M12 0 ]
-            // [ M21 M22 0 ]
-            // [ OffsetX OffsetY 1 ]
-            matrixData[0] = _transform.M11;
-            matrixData[1] = _transform.M12;
-            matrixData[2] = 0;
-            matrixData[3] = 0; // 填充
-
-            matrixData[4] = _transform.M21;
-            matrixData[5] = _transform.M22;
-            matrixData[6] = 0;
-            matrixData[7] = 0; // 填充
-
-            matrixData[8] = _transform.OffsetX;
-            matrixData[9] = _transform.OffsetY;
-            matrixData[10] = 1;
-            matrixData[11] = 0; // 填充
-
-            // 从第16字节开始设置变换矩阵（按行主序）
-            float* factorsData = bufferData + 16;
-            factorsData[0] = _strokeThicknessFactor;
-            factorsData[1] = _widthFactor;
-            factorsData[2] = _heightFactor;
+            fixed (float* constBufferDataPtr = constBufferData)
+            {
+                Unsafe.CopyBlockUnaligned(
+                    mappedConstBuffer.PData,
+                    constBufferDataPtr,
+                    (uint)(sizeof(float) * constBufferData.Length));
+            }
 
             _context.Unmap(_constantBuffer, 0);
         }
