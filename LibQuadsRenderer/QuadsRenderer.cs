@@ -97,6 +97,9 @@ namespace LibDxGeometryRendering
 
             // Configure rasterizer state
             ConfigureRasterizer();
+
+            // Configure blend state
+            ConfigureBlendState();
         }
 
         private void CreateDeviceContext(out ComPtr<ID3D11Device> device, out ComPtr<ID3D11DeviceContext> context)
@@ -362,6 +365,37 @@ namespace LibDxGeometryRendering
             ComPtr<ID3D11RasterizerState> rasterizerState = new();
             _device.CreateRasterizerState(&rastDesc, rasterizerState.GetAddressOf());
             _context.RSSetState(rasterizerState);
+        }
+
+        // 添加以下方法来设置混合状态
+        private void ConfigureBlendState()
+        {
+            // 创建混合状态
+            BlendDesc blendDesc = new BlendDesc
+            {
+                AlphaToCoverageEnable = 0, // FALSE
+                IndependentBlendEnable = 0, // FALSE - 所有渲染目标使用相同的混合设置
+            };
+
+            // 设置第一个渲染目标的混合属性
+            blendDesc.RenderTarget[0].BlendEnable = 1; // TRUE - 启用混合
+            blendDesc.RenderTarget[0].SrcBlend = Blend.SrcAlpha; // 源因子为源alpha值
+            blendDesc.RenderTarget[0].DestBlend = Blend.InvSrcAlpha; // 目标因子为(1 - 源alpha)
+            blendDesc.RenderTarget[0].BlendOp = BlendOp.Add; // 混合操作为加法
+            blendDesc.RenderTarget[0].SrcBlendAlpha = Blend.One; // Alpha源因子为1
+            blendDesc.RenderTarget[0].DestBlendAlpha = Blend.InvSrcAlpha; // Alpha目标因子为(1 - 源alpha)
+            blendDesc.RenderTarget[0].BlendOpAlpha = BlendOp.Add; // Alpha混合操作为加法
+            blendDesc.RenderTarget[0].RenderTargetWriteMask = (byte)ColorWriteEnable.All; // 允许写入所有颜色通道
+                                                                                          // 创建混合状态对象
+            ComPtr<ID3D11BlendState> blendState = new();
+            _device.CreateBlendState(&blendDesc, blendState.GetAddressOf());
+
+            // 应用混合状态到管道
+            float[] blendFactor = new float[] { 0.0f, 0.0f, 0.0f, 0.0f };
+            fixed (float* pBlendFactor = blendFactor)
+            {
+                _context.OMSetBlendState(blendState, pBlendFactor, 0xffffffff);
+            }
         }
 
         // 释放并重新创建渲染目标资源
