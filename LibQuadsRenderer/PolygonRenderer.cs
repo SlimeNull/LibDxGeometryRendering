@@ -16,11 +16,12 @@ using Silk.NET.Maths;
 
 namespace LibDxGeometryRendering
 {
-    public unsafe class QuadsRenderer : IDisposable
+    public unsafe class PolygonRenderer : IDisposable
     {
         private readonly int _width;
         private readonly int _height;
-        private readonly int _maxQuadCount;
+        private readonly int _polygonVertexCount;
+        private readonly int _maxPolygonCount;
         private int _quadCount;
 
         // 添加抗锯齿相关字段
@@ -49,13 +50,14 @@ namespace LibDxGeometryRendering
         private readonly Viewport _viewport;
 
         // Vertex layout
-        private readonly int _quadStride = Unsafe.SizeOf<Quad>();
+        private readonly int _polygonStride = Unsafe.SizeOf<Polygon>();
 
-        public QuadsRenderer(int width, int height, int maxQuadCount)
+        public PolygonRenderer(int width, int height, int vertexCount, int maxPolygonCount)
         {
             _width = width;
             _height = height;
-            _maxQuadCount = maxQuadCount;
+            _polygonVertexCount = vertexCount;
+            _maxPolygonCount = maxPolygonCount;
 
             // Create device and context
             CreateDeviceContext(out _device, out _context);
@@ -320,12 +322,12 @@ namespace LibDxGeometryRendering
             // Create vertex buffer
             BufferDesc vbDesc = new BufferDesc
             {
-                ByteWidth = (uint)(_maxQuadCount * _quadStride),
+                ByteWidth = (uint)(_maxPolygonCount * _polygonStride),
                 Usage = Usage.Dynamic,
                 BindFlags = (uint)BindFlag.VertexBuffer,
                 CPUAccessFlags = (uint)CpuAccessFlag.Write,
                 MiscFlags = 0,
-                StructureByteStride = (uint)_quadStride
+                StructureByteStride = (uint)_polygonStride
             };
 
             _device.CreateBuffer(in vbDesc, null, ref _vertexBuffer);
@@ -427,13 +429,13 @@ namespace LibDxGeometryRendering
             _context.Unmap(_constantBuffer, 0);
         }
 
-        public void SetQuads(ReadOnlySpan<Quad> quads)
+        public void SetQuads(ReadOnlySpan<Polygon> quads)
         {
             EnsureNotDisposed();
 
-            if (quads.Length > _maxQuadCount)
+            if (quads.Length > _maxPolygonCount)
             {
-                throw new ArgumentException($"Quad count ({quads.Length}) exceeds maximum capacity ({_maxQuadCount}).");
+                throw new ArgumentException($"Quad count ({quads.Length}) exceeds maximum capacity ({_maxPolygonCount}).");
             }
 
             // Map the vertex buffer
@@ -443,7 +445,7 @@ namespace LibDxGeometryRendering
             // Copy data to the vertex buffer
             Unsafe.CopyBlockUnaligned(mappedResource.PData,
                 Unsafe.AsPointer(ref MemoryMarshal.GetReference(quads)),
-                (uint)(quads.Length * _quadStride));
+                (uint)(quads.Length * _polygonStride));
 
             // Unmap the vertex buffer
             _context.Unmap(_vertexBuffer, 0);
@@ -482,7 +484,7 @@ namespace LibDxGeometryRendering
             _context.IASetInputLayout(_inputLayout);
 
             // Set vertex buffer
-            uint stride = (uint)_quadStride;
+            uint stride = (uint)_polygonStride;
             uint offset = 0;
             _context.IASetVertexBuffers(0, 1, _vertexBuffer.GetAddressOf(), &stride, &offset);
 
@@ -533,8 +535,12 @@ namespace LibDxGeometryRendering
 
         private byte[] CompileShader(string entryPoint, string profile)
         {
-            string shaderCode = """
+            StringBuilder sb = new StringBuilder();
+
+            sb.AppendLine($$"""
                 // QuadShader.hlsl
+
+                static const float PI = 3.14159265358979323846;
 
                 cbuffer ScreenBuffer : register(b0)
                 {
@@ -600,34 +606,52 @@ namespace LibDxGeometryRendering
                 }
 
                 // 几何着色器
-                [maxvertexcount(30)]
+                [maxvertexcount({{(_polygonVertexCount * 2) * 3 + (_polygonVertexCount - 2) * 3}})]
                 void GS(point GS_INPUT input[1], inout TriangleStream<PS_INPUT> triStream)
                 {
                     GS_INPUT i = input[0];
-                    
+
+                    float rotationStep = PI * 2 / {{_polygonVertexCount}};
+                    float halfRotationStep = rotationStep / 2;
+                    float baseRotation = -halfRotationStep + i.Rotation;
+
                     float halfStrokeWidth = i.StrokeWidth / 2;
-                    float2 halfSize = i.Size * 0.5f;
-                    float2 outerHalfSize = halfSize + float2(halfStrokeWidth, halfStrokeWidth);
-                    float2 innerHalfSize = halfSize - float2(halfStrokeWidth, halfStrokeWidth);
-                    
-                    // 生成旋转矩阵
-                    float sinR = sin(i.Rotation);
-                    float cosR = cos(i.Rotation);
-                    float2x2 rotMatrix = float2x2(cosR, sinR, -sinR, cosR);
+                    float outerHalfSize = halfSize + float2(halfStrokeWidth, halfStrokeWidth);
+                    float innerHalfSize = halfSize - float2(halfStrokeWidth, halfStrokeWidth);
+                """);
+
+            sb.AppendLine($$"""
+                    float2 cosValues[{{_polygonVertexCount}}];
+                    float2 sinValues[{{_polygonVertexCount}}];
+                    float2 outerCorners[4];
+                    float2 innerCorners[4];
+                """);
+
+            for (int i = 0; i < _polygonVertexCount; i++)
+            {
+                sb.AppendLine($$"""
+                    cosValues[0] = cos(baseRotation + rotationStep * {{i}}); // 左上
+                    sinValues[0] = sin(baseRotation + rotationStep * {{i}}); // 左上
+                """);
+            }
+
+            sb.AppendLine("""
+                    cosValues[0] = cos(baseRotation + rotationStep); // 左上
+                    cosValues[1] = ScreenToClipPoint(float2(outerHalfSize.x, -outerHalfSize.y) + i.Position);  // 右上
+                    cosValues[2] = ScreenToClipPoint(float2(outerHalfSize.x, outerHalfSize.y) + i.Position);   // 右下
+                    cosValues[3] = ScreenToClipPoint(float2(-outerHalfSize.x, outerHalfSize.y) + i.Position);  // 左下
                     
                     // 外部矩形的四个顶点（顺时针）
-                    float2 outerCorners[4];
-                    outerCorners[0] = ScreenToClipPoint(mul(float2(-outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position); // 左上
-                    outerCorners[1] = ScreenToClipPoint(mul(float2(outerHalfSize.x, -outerHalfSize.y), rotMatrix) + i.Position);  // 右上
-                    outerCorners[2] = ScreenToClipPoint(mul(float2(outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position);   // 右下
-                    outerCorners[3] = ScreenToClipPoint(mul(float2(-outerHalfSize.x, outerHalfSize.y), rotMatrix) + i.Position);  // 左下
+                    outerCorners[0] = ScreenToClipPoint(float2(-outerHalfSize.x, -outerHalfSize.y) + i.Position); // 左上
+                    outerCorners[1] = ScreenToClipPoint(float2(outerHalfSize.x, -outerHalfSize.y) + i.Position);  // 右上
+                    outerCorners[2] = ScreenToClipPoint(float2(outerHalfSize.x, outerHalfSize.y) + i.Position);   // 右下
+                    outerCorners[3] = ScreenToClipPoint(float2(-outerHalfSize.x, outerHalfSize.y) + i.Position);  // 左下
                     
                     // 内部矩形的四个顶点（顺时针）
-                    float2 innerCorners[4];
-                    innerCorners[0] = ScreenToClipPoint(mul(float2(-innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position); // 左上
-                    innerCorners[1] = ScreenToClipPoint(mul(float2(innerHalfSize.x, -innerHalfSize.y), rotMatrix) + i.Position);  // 右上
-                    innerCorners[2] = ScreenToClipPoint(mul(float2(innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position);   // 右下
-                    innerCorners[3] = ScreenToClipPoint(mul(float2(-innerHalfSize.x, innerHalfSize.y), rotMatrix) + i.Position);  // 左下
+                    innerCorners[0] = ScreenToClipPoint(float2(-innerHalfSize.x, -innerHalfSize.y) + i.Position); // 左上
+                    innerCorners[1] = ScreenToClipPoint(float2(innerHalfSize.x, -innerHalfSize.y) + i.Position);  // 右上
+                    innerCorners[2] = ScreenToClipPoint(float2(innerHalfSize.x, innerHalfSize.y) + i.Position);   // 右下
+                    innerCorners[3] = ScreenToClipPoint(float2(-innerHalfSize.x, innerHalfSize.y) + i.Position);  // 左下
                     
                     // 准备顶点
                     PS_INPUT v[12];
@@ -698,14 +722,16 @@ namespace LibDxGeometryRendering
                     triStream.Append(v[10]); // 右下
                     triStream.Append(v[11]); // 左下
                 }
-
+                """);
+            sb.AppendLine(
+                """
                 // 像素着色器
                 float4 PS(PS_INPUT input) : SV_Target
                 {
                     return input.Color;
                 }
 
-                """;
+                """);
 
             using var compiler = D3DCompiler.GetApi();
 
@@ -762,7 +788,7 @@ namespace LibDxGeometryRendering
             }
         }
 
-        ~QuadsRenderer()
+        ~PolygonRenderer()
         {
             // 不要更改此代码。请将清理代码放入“Dispose(bool disposing)”方法中
             Dispose(disposing: false);

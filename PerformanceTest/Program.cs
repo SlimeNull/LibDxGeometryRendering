@@ -15,12 +15,12 @@ namespace PerformanceTest
             var quadCount = 1000000;
 
             Bitmap bitmap = new Bitmap(1000, 1000, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            QuadsRenderer quadsRenderer = new QuadsRenderer(1000, 1000, quadCount);
+            PolygonRenderer quadsRenderer = new PolygonRenderer(1000, 1000, quadCount);
             bool firstRender = true;
 
             var frameCount = 0;
             Stopwatch stopwatch = Stopwatch.StartNew();
-            List<Quad> quads = new List<Quad>(quadCount);
+            List<Polygon> quads = new List<Polygon>(quadCount);
             quads.Clear();
             for (int i = 0; i < quadCount; i++)
             {
