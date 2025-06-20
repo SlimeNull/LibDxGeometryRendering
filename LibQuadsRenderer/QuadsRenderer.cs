@@ -50,6 +50,8 @@ namespace LibDxGeometryRendering
         // Vertex layout
         private readonly int _quadStride = Unsafe.SizeOf<Quad>();
 
+        public int MaxQuadCount => _maxQuadCount;
+
         public QuadsRenderer(int width, int height, int maxQuadCount)
         {
             _width = width;
