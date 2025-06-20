@@ -1,7 +1,6 @@
 ﻿
 using System;
 using System.IO;
-using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -517,7 +516,7 @@ namespace LibDxGeometryRendering
             // Copy data from staging resource to our buffer
             for (int y = 0; y < _height; y++)
             {
-                IntPtr srcRow = (nint)((IntPtr)mappedResource.PData + y * mappedResource.RowPitch);
+                IntPtr srcRow = (nint)((nint)mappedResource.PData + y * mappedResource.RowPitch);
                 int dstOffset = y * _width * 4;
 
                 // Copy row by row
