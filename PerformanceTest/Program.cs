@@ -2,7 +2,7 @@
 using System.Drawing;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using LibQuadsRenderer;
+using LibDxGeometryRendering;
 
 namespace PerformanceTest
 {

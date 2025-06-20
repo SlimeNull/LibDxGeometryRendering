@@ -1,4 +1,4 @@
-﻿using LibQuadsRenderer;
+﻿using LibDxGeometryRendering;
 using System.Numerics;
 
 namespace QuadsRendererTest

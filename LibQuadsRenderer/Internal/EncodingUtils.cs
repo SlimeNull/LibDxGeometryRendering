@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace LibQuadsRenderer.Internal
+namespace LibDxGeometryRendering.Internal
 {
     internal static class EncodingUtils
     {

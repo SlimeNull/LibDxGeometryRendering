@@ -5,7 +5,7 @@ using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using LibQuadsRenderer.Internal;
+using LibDxGeometryRendering.Internal;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D;
 using Silk.NET.Direct3D.Compilers;
@@ -14,7 +14,7 @@ using Silk.NET.DXGI;
 using Silk.NET.Maths;
 
 
-namespace LibQuadsRenderer
+namespace LibDxGeometryRendering
 {
     public unsafe class QuadsRenderer : IDisposable
     {
