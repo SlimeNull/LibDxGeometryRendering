@@ -651,7 +651,7 @@ namespace LibDxGeometryRendering
                 }
 
                 // 几何着色器
-                [maxvertexcount(30)]
+                [maxvertexcount(15)]
                 void GS(point GS_INPUT input[1], inout TriangleStream<PS_INPUT> triStream)
                 {
                     GS_INPUT i = input[0];
@@ -706,51 +706,22 @@ namespace LibDxGeometryRendering
                     // 左边描边
                     triStream.Append(v[0]);
                     triStream.Append(v[4]);
+                    triStream.Append(v[1]);
+                    triStream.Append(v[5]);
+                    triStream.Append(v[2]);
+                    triStream.Append(v[6]);
                     triStream.Append(v[3]);
-                    
-                    triStream.Append(v[3]);
-                    triStream.Append(v[4]);
                     triStream.Append(v[7]);
-                    triStream.RestartStrip();
-                    
-                    // 上边描边
                     triStream.Append(v[0]);
-                    triStream.Append(v[1]);
                     triStream.Append(v[4]);
-                    
-                    triStream.Append(v[4]);
-                    triStream.Append(v[1]);
-                    triStream.Append(v[5]);
                     triStream.RestartStrip();
-                    
-                    // 右边描边
-                    triStream.Append(v[1]);
-                    triStream.Append(v[2]);
-                    triStream.Append(v[5]);
-                    
-                    triStream.Append(v[5]);
-                    triStream.Append(v[2]);
-                    triStream.Append(v[6]);
+
+                    triStream.Append(v[8]);
+                    triStream.Append(v[9]);
+                    triStream.Append(v[10]);
+                    triStream.Append(v[11]);
+                    triStream.Append(v[8]);
                     triStream.RestartStrip();
-                    
-                    // 下边描边
-                    triStream.Append(v[3]);
-                    triStream.Append(v[7]);
-                    triStream.Append(v[2]);
-                    
-                    triStream.Append(v[2]);
-                    triStream.Append(v[7]);
-                    triStream.Append(v[6]);
-                    triStream.RestartStrip();
-                    
-                    // 输出填充三角形 - 2个三角形形成填充区域
-                    triStream.Append(v[8]);  // 左上
-                    triStream.Append(v[9]);  // 右上
-                    triStream.Append(v[11]); // 左下
-                    
-                    triStream.Append(v[9]);  // 右上
-                    triStream.Append(v[10]); // 右下
-                    triStream.Append(v[11]); // 左下
                 }
 
                 // 像素着色器
